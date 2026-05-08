@@ -11,7 +11,6 @@ This repository contains the source configuration and deployment files for a loc
 ## Repository structure
 
 ```text
-.
 ├─ docker/
 │  └─ docker-compose.yml
 ├─ homeassistant/
