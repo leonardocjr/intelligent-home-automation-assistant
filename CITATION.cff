@@ -9,14 +9,14 @@ repository-code: "https://github.com/leonardocjr/intelligent-home-automation-ass
 url: "https://github.com/leonardocjr/intelligent-home-automation-assistant"
 abstract: "A local smart-home assistant that integrates Home Assistant, Frigate, Mosquitto MQTT, Alexa routines through HA-Bridge, and automation workflows for domestic home automation control."
 keywords:
-  - "home automation"
-  - "smart home"
-  - "home assistant"
-  - "frigate"
-  - "mqtt"
-  - "ha-bridge"
-  - "edge ai"
-  - "computer vision"
+  - home automation
+  - smart home
+  - home assistant
+  - frigate
+  - mqtt
+  - ha-bridge
+  - edge ai
+  - computer vision
 license: "MIT"
 version: "0.1.0"
-date-released: 2026-05-08
+date-released: "2026-05-08"
