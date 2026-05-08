@@ -1,0 +1,132 @@
+go2rtc:
+  streams:
+    wowza_test:
+      - rtsp://716f898c7b71.entrypoint.cloud.wowza.com:1935/app-8F9K44lJ/304679fe_stream2
+    kvarkense:
+      - rtsp://ubnt:ubnt@83.68.229.33:10554/live/ch00_0
+    gazikcomua:
+      - rtsp://admin:admin@193.56.148.190:554/live/ch00_0
+    airmaxpl:
+      - rtsp://ubnt:ubnt@176.111.143.138:554/live/ch00_0
+    softexncp:
+      - rtsp://admin:admin@213.129.131.54:554/live/ch00_0
+    vodafonecz:
+      - rtsp://admin:admin@46.167.248.2:554/live/ch00_0
+    tcomhr:
+      - rtsp://admin:admin@93.137.134.111:554/live/ch00_0
+    tkomcz:
+      - rtsp://admin:admin@77.48.206.4:554/live/ch00_0
+    netroniks:
+      - rtsp://admin:admin@85.187.195.198:554/live/ch00_0
+
+mqtt:
+  enabled: false
+
+cameras:
+  wowza_test:
+    ffmpeg:
+      inputs:
+        - path: rtsp://716f898c7b71.entrypoint.cloud.wowza.com:1935/app-8F9K44lJ/304679fe_stream2
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1920
+      height: 1080
+      fps: 5
+
+  kvarkense:
+    ffmpeg:
+      inputs:
+        - path: rtsp://ubnt:ubnt@83.68.229.33:10554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  gazikcomua:
+    ffmpeg:
+      inputs:
+        - path: rtsp://admin:admin@193.56.148.190:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  airmaxpl:
+    ffmpeg:
+      inputs:
+        - path: rtsp://ubnt:ubnt@176.111.143.138:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  softexncp:
+    ffmpeg:
+      inputs:
+        - path: rtsp://admin:admin@213.129.131.54:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  vodafonecz:
+    ffmpeg:
+      inputs:
+        - path: rtsp://admin:admin@46.167.248.2:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  tcomhr:
+    ffmpeg:
+      inputs:
+        - path: rtsp://admin:admin@93.137.134.111:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  tkomcz:
+    ffmpeg:
+      inputs:
+        - path: rtsp://admin:admin@77.48.206.4:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5
+
+  netroniks:
+    ffmpeg:
+      inputs:
+        - path: rtsp://admin:admin@85.187.195.198:554/live/ch00_0
+          roles:
+            - detect
+            - record
+    detect:
+      width: 1280
+      height: 720
+      fps: 5

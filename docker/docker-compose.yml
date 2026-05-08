@@ -1,0 +1,46 @@
+services:
+  mosquitto:
+    container_name: mosquitto
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ../mosquitto/config:/mosquitto/config
+      - ../mosquitto/data:/mosquitto/data
+      - ../mosquitto/log:/mosquitto/log
+
+  frigate:
+    container_name: frigate
+    image: ghcr.io/blakeblackshear/frigate:stable
+    restart: unless-stopped
+    privileged: true
+    shm_size: "512mb"
+    depends_on:
+      - mosquitto
+    ports:
+      - "5000:5000"
+      - "8554:8554"
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
+    volumes:
+      - ../frigate/config:/config
+      - ../frigate/media:/media/frigate
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      FRIGATE_RTSP_PASSWORD: "YOUR_RTSP_PASSWORD"
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - mosquitto
+    volumes:
+      - ../homeassistant/config:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      TZ: "Europe/Lisbon"

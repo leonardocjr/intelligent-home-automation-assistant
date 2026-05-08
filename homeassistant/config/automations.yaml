@@ -1,0 +1,1337 @@
+- alias: "Frigate - daily status reset"
+  id: frigate_daily_status_reset
+  mode: single
+  trigger:
+    - platform: time
+      at: "00:00:10"
+
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.dog_seen_today
+          - input_boolean.cat_seen_today
+          - input_boolean.leonardo_seen_today
+          - input_boolean.beatriz_seen_today
+          - input_boolean.amazon_seen_today
+          - input_boolean.ctt_seen_today
+          - input_boolean.police_seen_today
+          - input_boolean.leonardo_car_arrived_today
+          - input_boolean.leonardo_car_left_today
+          - input_boolean.unknown_person_detected_today
+          - input_boolean.unknown_vehicle_detected_today
+
+    - service: input_number.set_value
+      target:
+        entity_id:
+          - input_number.amazon_count_today
+          - input_number.ctt_count_today
+          - input_number.police_count_today
+          - input_number.unknown_person_count_today
+          - input_number.unknown_vehicle_count_today
+      data:
+        value: 0
+
+- alias: "Frigate - new pet notification"
+  id: frigate_notify_new_pet
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.type == 'new'
+           and trigger.payload_json.after is defined
+           and trigger.payload_json.after.label in ['dog', 'cat'] }}
+
+  variables:
+    pet_name: "{{ trigger.payload_json.after.label | title }}"
+    camera_friendly: "{{ trigger.payload_json.after.camera | replace('_', ' ') | title }}"
+    message: "{{ pet_name }} was detected on camera {{ camera_friendly }}"
+
+  action:
+    - service: script.broadcast_announcement
+      data:
+        title: "[Frigate] {{ pet_name }} Alert"
+        message: "{{ message }}"
+        notification_id: "{{ trigger.payload_json.after.label }}_detected_{{ trigger.payload_json.after.camera }}"
+
+- alias: "Frigate - update pet last seen"
+  id: frigate_update_pet_last_seen
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.after is defined and
+           trigger.payload_json.after.label in ['dog', 'cat'] }}
+
+  variables:
+    pet_label: "{{ trigger.payload_json.after.label }}"
+    camera_name: "{{ trigger.payload_json.after.camera }}"
+    seen_today_entity: "input_boolean.{{ pet_label }}_seen_today"
+    first_seen_entity: "input_datetime.{{ pet_label }}_first_seen_today"
+
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ is_state(seen_today_entity, 'off') }}"
+          sequence:
+            - service: input_datetime.set_datetime
+              data:
+                entity_id: "{{ first_seen_entity }}"
+                datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+            - service: input_boolean.turn_on
+              data:
+                entity_id: "{{ seen_today_entity }}"
+
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: "input_datetime.{{ pet_label }}_last_seen"
+      data:
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: "input_text.{{ pet_label }}_last_camera"
+      data:
+        value: "{{ camera_name }}"
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: "input_boolean.{{ pet_label }}_missing_alert_sent"
+
+
+- alias: "Frigate - pet absence alert"
+  id: frigate_pet_absence_alert
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/1"
+
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ states('input_datetime.dog_last_seen') not in ['unknown', 'unavailable', '', none]
+                   and (as_timestamp(now()) - as_timestamp(states('input_datetime.dog_last_seen'))) >= (15 * 60)
+                   and is_state('input_boolean.dog_missing_alert_sent', 'off') }}
+          sequence:
+            - variables:
+                message: >
+                  Dog was last seen at
+                  {{ as_timestamp(states('input_datetime.dog_last_seen')) | timestamp_custom('%H:%M') }}
+                  on camera
+                  {{ states('input_text.dog_last_camera') | replace('_', ' ') | title }}
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Dog Alert"
+                message: "{{ message }}"
+                notification_id: "dog_last_seen"
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.dog_missing_alert_sent
+
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ states('input_datetime.cat_last_seen') not in ['unknown', 'unavailable', '', none]
+                   and (as_timestamp(now()) - as_timestamp(states('input_datetime.cat_last_seen'))) >= (15 * 60)
+                   and is_state('input_boolean.cat_missing_alert_sent', 'off') }}
+          sequence:
+            - variables:
+                message: >
+                  Cat was last seen at
+                  {{ as_timestamp(states('input_datetime.cat_last_seen')) | timestamp_custom('%H:%M') }}
+                  on camera
+                  {{ states('input_text.cat_last_camera') | replace('_', ' ') | title }}
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Cat Alert"
+                message: "{{ message }}"
+                notification_id: "cat_last_seen"
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.cat_missing_alert_sent
+
+
+- alias: "Frigate - update resident last seen"
+  id: frigate_update_resident_last_seen
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.after is defined and
+           trigger.payload_json.after.label == 'person' and
+           trigger.payload_json.after.sub_label is defined and
+           trigger.payload_json.after.sub_label is not none }}
+
+  action:
+    - variables:
+        person_name: "{{ trigger.payload_json.after.sub_label[0] }}"
+        person_slug: >
+          {{ trigger.payload_json.after.sub_label[0]
+             | lower
+             | replace(' ', '_')
+             | replace('ã', 'a')
+             | replace('á', 'a')
+             | replace('à', 'a')
+             | replace('â', 'a')
+             | replace('é', 'e')
+             | replace('ê', 'e')
+             | replace('í', 'i')
+             | replace('ó', 'o')
+             | replace('ô', 'o')
+             | replace('õ', 'o')
+             | replace('ú', 'u')
+             | replace('ç', 'c') }}
+        tracked_daily_residents:
+          - leonardo
+          - beatriz
+        seen_today_entity: "input_boolean.{{ person_slug }}_seen_today"
+        first_seen_entity: "input_datetime.{{ person_slug }}_first_seen_today"
+
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ person_slug in tracked_daily_residents and
+                   is_state(seen_today_entity, 'off') }}
+          sequence:
+            - service: input_datetime.set_datetime
+              data:
+                entity_id: "{{ first_seen_entity }}"
+                datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+            - service: input_boolean.turn_on
+              data:
+                entity_id: "{{ seen_today_entity }}"
+
+    - service: input_text.set_value
+      data:
+        entity_id: "input_text.{{ person_slug }}_last_camera"
+        value: "{{ trigger.payload_json.after.camera }}"
+
+    - service: input_datetime.set_datetime
+      data:
+        entity_id: "input_datetime.{{ person_slug }}_last_seen"
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_boolean.turn_off
+      data:
+        entity_id: "input_boolean.{{ person_slug }}_missing_alert_sent"
+
+
+- alias: "Frigate - known person notification"
+  id: frigate_known_person_notification
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.type == 'new' and
+           trigger.payload_json.after is defined and
+           trigger.payload_json.after.label == 'person' and
+           trigger.payload_json.after.sub_label is defined and
+           trigger.payload_json.after.sub_label is not none and
+           trigger.payload_json.after.sub_label | count > 0 }}
+
+  action:
+    - variables:
+        person_name: "{{ trigger.payload_json.after.sub_label[0] }}"
+        person_slug: >
+          {{ trigger.payload_json.after.sub_label[0]
+             | lower
+             | replace(' ', '_')
+             | replace('ã', 'a')
+             | replace('á', 'a')
+             | replace('à', 'a')
+             | replace('â', 'a')
+             | replace('é', 'e')
+             | replace('ê', 'e')
+             | replace('í', 'i')
+             | replace('ó', 'o')
+             | replace('ô', 'o')
+             | replace('õ', 'o')
+             | replace('ú', 'u')
+             | replace('ç', 'c') }}
+        cooldown_seconds: 120
+        last_announced_entity: "input_datetime.{{ person_slug }}_last_announced"
+
+    - condition: template
+      value_template: >
+        {% set last = states(last_announced_entity) %}
+        {{ last in ['unknown', 'unavailable', '', none] or
+           (as_timestamp(now()) - as_timestamp(last)) > cooldown_seconds }}
+
+    - service: script.broadcast_announcement
+      data:
+        title: "[Frigate] Known Person Alert"
+        message: "{{ person_name }} was detected on camera {{ trigger.payload_json.after.camera | replace('_', ' ') | title }}"
+        notification_id: "frigate_known_person_{{ person_slug }}"
+
+    - service: input_datetime.set_datetime
+      data:
+        entity_id: "{{ last_announced_entity }}"
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+
+- alias: "Frigate - resident absence alert"
+  id: frigate_resident_absence_alert
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/1"
+
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ states('input_datetime.leonardo_last_seen') not in ['unknown', 'unavailable', '', none]
+                   and (as_timestamp(now()) - as_timestamp(states('input_datetime.leonardo_last_seen'))) >= (15 * 60)
+                   and is_state('input_boolean.leonardo_missing_alert_sent', 'off') }}
+          sequence:
+            - variables:
+                message: >
+                  Leonardo was last seen at
+                  {{ as_timestamp(states('input_datetime.leonardo_last_seen')) | timestamp_custom('%H:%M') }}
+                  on camera
+                  {{ states('input_text.leonardo_last_camera') | replace('_', ' ') | title }}
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Missing Person Alert"
+                message: "{{ message }}"
+                notification_id: "leonardo_missing_alert"
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.leonardo_missing_alert_sent
+
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ states('input_datetime.beatriz_last_seen') not in ['unknown', 'unavailable', '', none]
+                   and (as_timestamp(now()) - as_timestamp(states('input_datetime.beatriz_last_seen'))) >= (15 * 60)
+                   and is_state('input_boolean.beatriz_missing_alert_sent', 'off') }}
+          sequence:
+            - variables:
+                message: >
+                  Beatriz was last seen at
+                  {{ as_timestamp(states('input_datetime.beatriz_last_seen')) | timestamp_custom('%H:%M') }}
+                  on camera
+                  {{ states('input_text.beatriz_last_camera') | replace('_', ' ') | title }}
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Missing Person Alert"
+                message: "{{ message }}"
+                notification_id: "beatriz_missing_alert"
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.beatriz_missing_alert_sent
+
+
+- alias: "Arm alarm when all residents are unseen"
+  id: arm_alarm_when_all_residents_are_unseen
+  mode: single
+  trigger:
+    - platform: time_pattern
+      minutes: "/1"
+
+  variables:
+    resident_slugs:
+      - leonardo
+      - beatriz
+    away_delay_seconds: "{{ 15 * 60 }}"
+    all_residents_away: >
+      {% set ns = namespace(all_away=true) %}
+      {% for slug in resident_slugs %}
+        {% set entity = 'input_datetime.' ~ slug ~ '_last_seen' %}
+        {% set last_seen = states(entity) %}
+        {% if last_seen in ['unknown', 'unavailable', '', None] %}
+          {% set ns.all_away = false %}
+        {% else %}
+          {% set elapsed = as_timestamp(now()) - as_timestamp(last_seen) %}
+          {% if elapsed < away_delay_seconds | int %}
+            {% set ns.all_away = false %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.all_away }}
+
+  condition:
+    - condition: template
+      value_template: "{{ all_residents_away }}"
+    - condition: state
+      entity_id: input_boolean.house_alarm_armed
+      state: "off"
+
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.house_alarm_armed
+
+    - service: script.broadcast_announcement
+      data:
+        title: "[Frigate] Alarm armed alert"
+        message: "House empty for 15 minutes. Alarm was armed."
+        notification_id: "house_empty"
+        
+
+- alias: "Webhook - Dog Status TTS"
+  id: webhook_dog_status_tts
+  mode: single
+  trigger:
+    - platform: webhook
+      webhook_id: dog_status_tts
+      allowed_methods:
+        - GET
+      local_only: false
+  action:
+    - service: script.entity_status_tts
+      data:
+        entity_key: "dog"
+        spoken_name: "Dog"
+
+- alias: "Webhook - Cat Status TTS"
+  id: webhook_cat_status_tts
+  mode: single
+  trigger:
+    - platform: webhook
+      webhook_id: cat_status_tts
+      allowed_methods:
+        - GET
+      local_only: false
+  action:
+    - service: script.entity_status_tts
+      data:
+        entity_key: "cat"
+        spoken_name: "Cat"
+
+- alias: "Webhook - Leonardo Status TTS"
+  id: webhook_leonardo_status_tts
+  mode: single
+  trigger:
+    - platform: webhook
+      webhook_id: leonardo_status_tts
+      allowed_methods:
+        - GET
+      local_only: false
+  action:
+    - service: script.entity_status_tts
+      data:
+        entity_key: "leonardo"
+        spoken_name: "Leonardo"
+
+- alias: "Webhook - Beatriz Status TTS"
+  id: webhook_beatriz_status_tts
+  mode: single
+  trigger:
+    - platform: webhook
+      webhook_id: beatriz_status_tts
+      allowed_methods:
+        - GET
+      local_only: false
+  action:
+    - service: script.entity_status_tts
+      data:
+        entity_key: "beatriz"
+        spoken_name: "Beatriz"
+
+- alias: "Frigate - authorized resident gestures"
+  id: frigate_authorized_resident_gestures
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+
+  variables:
+    authorized_residents:
+      - leonardo
+
+    person_slug: >
+      {% set sub = trigger.payload_json.after.sub_label %}
+      {% if sub is string %}
+        {{ sub | lower | replace(' ', '_') }}
+      {% elif sub is iterable and sub | count > 0 %}
+        {{ sub[0] | lower | replace(' ', '_') }}
+      {% else %}
+        unknown
+      {% endif %}
+
+    event_id: "{{ trigger.payload_json.after.id | default('') }}"
+    event_camera: "{{ trigger.payload_json.after.camera | default('') }}"
+
+    gesture_name: >
+      {% set g = trigger.payload_json.after.gestures | default([]) %}
+      {% if g is iterable and g | count > 0 %}
+        {{ g[0] | lower }}
+      {% else %}
+        none
+      {% endif %}
+
+    gesture_score: >
+      {% set g = trigger.payload_json.after.gestures | default([]) %}
+      {% if g is iterable and g | count > 1 %}
+        {{ g[1] }}
+      {% else %}
+        0
+      {% endif %}
+
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.type in ['new', 'update'] }}
+
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.after is defined and
+           trigger.payload_json.after.label == 'person' and
+           trigger.payload_json.after.sub_label is defined and
+           trigger.payload_json.after.sub_label is not none }}
+
+    - condition: template
+      value_template: >
+        {{ person_slug in authorized_residents }}
+
+    - condition: template
+      value_template: >
+        {{ gesture_name in ['thumbsup', 'thumbsdown', 'punch', 'stophand'] }}
+
+    - condition: template
+      value_template: >
+        {{ not (
+             states('input_text.leonardo_last_gesture_event_id') == event_id
+             and states('input_text.leonardo_last_gesture_name') == gesture_name
+           ) }}
+
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ gesture_name == 'thumbsup' and
+                   is_state('input_boolean.house_alarm_armed', 'off') }}
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.house_alarm_armed
+
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Alarm armed via gesture alert"
+                message: >
+                  Leonardo recognized. Thumbs up detected. Alarm armed.
+                notification_id: "frigate_alarm_gesture"
+
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ gesture_name == 'thumbsdown' and
+                   is_state('input_boolean.house_alarm_armed', 'on') }}
+          sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: input_boolean.house_alarm_armed
+
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Alarm disarmed via gesture alert"
+                message: >
+                  Leonardo recognized. Thumbs down detected. Alarm disarmed.
+                notification_id: "frigate_alarm_gesture"
+
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ gesture_name == 'punch' and
+                   is_state('input_boolean.gate_is_open', 'off') }}
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.gate_is_open
+
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Gate opened via gesture alert"
+                message: >
+                  Leonardo recognized. Punch detected. Gate opened.
+                notification_id: "frigate_gate_gesture"
+
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ gesture_name == 'stophand' and
+                   is_state('input_boolean.gate_is_open', 'on') }}
+          sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: input_boolean.gate_is_open
+
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Gate closed via gesture alert"
+                message: >
+                  Leonardo recognized. Stop hand detected. Gate closed.
+                notification_id: "frigate_gate_gesture"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.leonardo_last_gesture_event_id
+      data:
+        value: "{{ event_id }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.leonardo_last_gesture_name
+      data:
+        value: "{{ gesture_name }}"
+
+
+- alias: "Frigate - external security audio alerts all cameras"
+  id: frigate_external_security_audio_alerts_all_cameras
+  mode: parallel
+  trigger:
+    - platform: mqtt
+      topic: frigate/+/audio/fire_alarm
+      payload: "ON"
+      id: fire_alarm
+
+    - platform: mqtt
+      topic: frigate/+/audio/scream
+      payload: "ON"
+      id: scream
+
+    - platform: mqtt
+      topic: frigate/+/audio/yell
+      payload: "ON"
+      id: yell
+
+  variables:
+    camera_name: "{{ trigger.topic.split('/')[1] }}"
+    audio_type: "{{ trigger.topic.split('/')[3] }}"
+
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.id == 'fire_alarm' }}"
+          sequence:
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Security fire alarm alert"
+                message: >
+                  Attention! I identified a fire alarm on camera {{ camera_name | replace('_', ' ') | title }}
+                notification_id: "frigate_fire_alarm_{{ camera_name }}"
+
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.id in ['scream', 'yell'] }}"
+          sequence:
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Scream detect alert"
+                message: >
+                  Attention - A scream was detected on camera {{ camera_name | replace('_', ' ') | title }}
+                  Audio type: {{ audio_type }}.
+                notification_id: "frigate_scream_{{ camera_name }}"
+
+
+- alias: "Frigate - known plate arrival"
+  id: frigate_known_plate_leonardo_arrival
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/tracked_object_update
+
+  variables:
+    payload: "{{ trigger.payload_json }}"
+    event_id: "{{ payload.id | default('') }}"
+    camera_name: "{{ payload.camera | default('') }}"
+    plate_name: "{{ payload.name | default('') }}"
+    plate_raw: "{{ payload.plate | default('') }}"
+    plate_norm: "{{ plate_raw | upper | replace('-', '') | replace(' ', '') }}"
+
+  condition:
+    - condition: template
+      value_template: "{{ payload.type == 'lpr' }}"
+
+    - condition: template
+      value_template: "{{ camera_name == 'entrance_cam' }}"
+
+    - condition: template
+      value_template: >
+        {{ (plate_name | lower == 'leonardo') or (plate_norm == 'GAZ1G92') }}
+
+    - condition: template
+      value_template: >
+        {{ states('input_text.frigate_last_known_plate_event_id') != event_id }}
+
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "[Frigate] Known vehicle alert"
+        message: >
+          Leonardo's car arrived at the garage on camera {{ camera_name | replace('_', ' ') | title }}
+          Plate: {{ plate_norm }}.
+        notification_id: "frigate_known_plate_{{ camera_name }}"
+
+    - service: notify.alexa_media
+      data:
+        target:
+          - media_player.speaker
+        message: >
+          Leonardo has arrived at the garage.
+        data:
+          type: announce
+
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.leonardo_car_arrived_today
+
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.leonardo_car_arrived_at
+      data:
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.frigate_last_known_plate_event_id
+      data:
+        value: "{{ event_id }}"
+
+
+- alias: "Frigate - known plate departure"
+  id: frigate_known_plate_leonardo_departure
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/tracked_object_update
+
+  variables:
+    payload: "{{ trigger.payload_json }}"
+    event_id: "{{ payload.id | default('') }}"
+    camera_name: "{{ payload.camera | default('') }}"
+    plate_name: "{{ payload.name | default('') }}"
+    plate_raw: "{{ payload.plate | default('') }}"
+    plate_norm: "{{ plate_raw | upper | replace('-', '') | replace(' ', '') }}"
+
+  condition:
+    - condition: template
+      value_template: "{{ payload.type == 'lpr' }}"
+
+    - condition: template
+      value_template: "{{ camera_name == 'street_cam' }}"
+
+    - condition: template
+      value_template: >
+        {{ (plate_name | lower == 'leonardo') or (plate_norm == 'GAZ1G92') }}
+
+    - condition: template
+      value_template: >
+        {{ states('input_text.frigate_last_known_plate_departure_event_id') != event_id }}
+
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.leonardo_car_left_today
+
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.leonardo_car_left_at
+      data:
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.frigate_last_known_plate_departure_event_id
+      data:
+        value: "{{ event_id }}"
+
+
+- alias: "Frigate - unknown vehicle at perimeter"
+  id: frigate_unknown_vehicle_perimeter
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/tracked_object_update
+
+  variables:
+    payload: "{{ trigger.payload_json }}"
+    event_id: "{{ payload.id | default('') }}"
+    camera_name: "{{ payload.camera | default('') }}"
+    plate_name: "{{ payload.name | default('') }}"
+    plate_raw: "{{ payload.plate | default('') }}"
+    plate_norm: "{{ plate_raw | upper | replace('-', '') | replace(' ', '') }}"
+
+  condition:
+    - condition: template
+      value_template: "{{ payload.type == 'lpr' }}"
+
+    - condition: template
+      value_template: "{{ camera_name == 'entrance_cam' }}"
+
+    - condition: template
+      value_template: >
+        {{ (plate_name is none or plate_name == '') and plate_norm != '' }}
+
+    - condition: template
+      value_template: >
+        {{ states('input_text.frigate_last_unknown_plate_event_id') != event_id }}
+
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "[Frigate] Unknown vehicle alert"
+        message: >
+          Unknown vehicle detected inside the perimeter on camera {{ camera_name | replace('_', ' ') | title }}
+          Plate: {{ plate_raw }}.
+        notification_id: "frigate_unknown_plate_{{ camera_name }}"
+
+    - service: notify.alexa_media
+      data:
+        target:
+          - media_player.speaker
+        message: >
+          Attention. An unknown car has arrived at the perimeter on camera {{ camera_name | replace('_', ' ') | title }}
+        data:
+          type: announce
+
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.unknown_vehicle_detected_today
+
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.last_unknown_vehicle_time
+      data:
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.unknown_vehicle_count_today
+      data:
+        value: "{{ states('input_number.unknown_vehicle_count_today') | int(0) + 1 }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.frigate_last_unknown_plate_event_id
+      data:
+        value: "{{ event_id }}"
+
+
+- alias: "Frigate - unknown person at entrance perimeter"
+  id: frigate_unknown_person_entrance_perimeter
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+
+  variables:
+    after: "{{ trigger.payload_json.after }}"
+    event_id: "{{ after.id | default('') }}"
+    camera_name: "{{ after.camera | default('') }}"
+
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.type in ['new', 'update'] }}
+
+    - condition: template
+      value_template: >
+        {{ after is defined and after.label == 'person' }}
+
+    - condition: template
+      value_template: >
+        {{ camera_name == 'entrance_cam' }}
+
+    - condition: template
+      value_template: >
+        {{ after.sub_label is none }}
+
+    - condition: template
+      value_template: >
+        {{ after.false_positive == false }}
+
+    - condition: template
+      value_template: >
+        {{ states('input_text.frigate_last_unknown_person_event_id') != event_id }}
+
+  action:
+    - delay:
+        seconds: 60
+
+    - condition: template
+      value_template: >
+        {{ states('input_text.frigate_last_unknown_person_event_id') != event_id }}
+
+    - service: script.broadcast_announcement
+      data:
+        title: "[Frigate] Unknown person alert"
+        message: >
+          Unknown person detected inside the perimeter on camera {{ camera_name | replace('_', ' ') | title }}
+        notification_id: "frigate_unknown_person_{{ camera_name }}"
+
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.unknown_person_detected_today
+
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.last_unknown_person_time
+      data:
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.unknown_person_count_today
+      data:
+        value: "{{ states('input_number.unknown_person_count_today') | int(0) + 1 }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.frigate_last_unknown_person_event_id
+      data:
+        value: "{{ event_id }}"
+
+
+- alias: "Frigate - identified carrier and police vehicles"
+  id: frigate_identified_car_alerts
+  mode: queued
+  trigger:
+    - platform: mqtt
+      topic: frigate/tracked_object_update
+
+  variables:
+    payload: "{{ trigger.payload_json }}"
+    event_id: "{{ payload.id | default('') }}"
+    camera_name: "{{ payload.camera | default('unknown_camera') }}"
+    camera_friendly: "{{ camera_name | replace('_', ' ') | title }}"
+    model_name: "{{ payload.model | default('') }}"
+    identified_value: "{{ payload.attribute | default(payload.sub_label | default('')) | lower }}"
+    vehicle_name: >
+      {% if identified_value == 'ctt' %}
+        CTT
+      {% elif identified_value == 'amazon' %}
+        Amazon
+      {% elif identified_value == 'police' %}
+        police
+      {% else %}
+        {{ identified_value }}
+      {% endif %}
+    seen_boolean_entity: >
+      {% if identified_value == 'amazon' %}
+        input_boolean.amazon_seen_today
+      {% elif identified_value == 'ctt' %}
+        input_boolean.ctt_seen_today
+      {% elif identified_value == 'police' %}
+        input_boolean.police_seen_today
+      {% else %}
+        input_boolean.amazon_seen_today
+      {% endif %}
+    last_seen_entity: >
+      {% if identified_value == 'amazon' %}
+        input_datetime.amazon_last_seen_today
+      {% elif identified_value == 'ctt' %}
+        input_datetime.ctt_last_seen_today
+      {% elif identified_value == 'police' %}
+        input_datetime.police_last_seen_today
+      {% else %}
+        input_datetime.amazon_last_seen_today
+      {% endif %}
+    count_entity: >
+      {% if identified_value == 'amazon' %}
+        input_number.amazon_count_today
+      {% elif identified_value == 'ctt' %}
+        input_number.ctt_count_today
+      {% elif identified_value == 'police' %}
+        input_number.police_count_today
+      {% else %}
+        input_number.amazon_count_today
+      {% endif %}
+
+  condition:
+    - condition: template
+      value_template: "{{ payload.type == 'classification' }}"
+    - condition: template
+      value_template: "{{ model_name == 'identified_cars' }}"
+    - condition: template
+      value_template: "{{ identified_value in ['amazon', 'ctt', 'police'] }}"
+    - condition: template
+      value_template: "{{ states('input_text.frigate_last_identified_car_event_id') != event_id }}"
+
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: "{{ seen_boolean_entity }}"
+
+    - service: input_datetime.set_datetime
+      target:
+        entity_id: "{{ last_seen_entity }}"
+      data:
+        datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: input_number.set_value
+      target:
+        entity_id: "{{ count_entity }}"
+      data:
+        value: "{{ states(count_entity) | int(0) + 1 }}"
+
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ identified_value in ['amazon', 'ctt'] }}"
+          sequence:
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Delivery vehicle Alert"
+                message: >
+                  A {{ vehicle_name }} delivery vehicle was detected on camera {{ camera_friendly }}.
+                notification_id: "frigate_identified_car_{{ event_id }}"
+
+        - conditions:
+            - condition: template
+              value_template: "{{ identified_value == 'police' }}"
+          sequence:
+            - service: script.broadcast_announcement
+              data:
+                title: "[Frigate] Police vehicle alert"
+                message: >
+                  A police car was detected on camera {{ camera_friendly }}.
+                notification_id: "frigate_identified_car_{{ event_id }}"
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.frigate_last_identified_car_event_id
+      data:
+        value: "{{ event_id }}"
+
+
+- alias: "Webhook - Daily Status TTS Gemini"
+  id: webhook_daily_status_tts_gemini
+  mode: single
+
+  trigger:
+    - platform: webhook
+      webhook_id: daily_status_tts
+      allowed_methods:
+        - GET
+        - POST
+      local_only: true
+
+  variables:
+    llm_cooldown_seconds: 90
+    last_llm_call: "{{ states('input_datetime.daily_status_last_llm_call') }}"
+    can_call_llm: >-
+      {{ last_llm_call in ['unknown', 'unavailable', '', none]
+         or (as_timestamp(now()) - as_timestamp(last_llm_call)) > llm_cooldown_seconds }}
+
+    helper_facts_json: >-
+      {{
+        {
+          "dog": {
+            "seen_today": is_state('input_boolean.dog_seen_today', 'on'),
+            "first_seen": states('input_datetime.dog_first_seen_today') if is_state('input_boolean.dog_seen_today', 'on') else '',
+            "last_seen": states('input_datetime.dog_last_seen') if is_state('input_boolean.dog_seen_today', 'on') else '',
+            "last_camera": states('input_text.dog_last_camera') if is_state('input_boolean.dog_seen_today', 'on') else ''
+          },
+          "cat": {
+            "seen_today": is_state('input_boolean.cat_seen_today', 'on'),
+            "first_seen": states('input_datetime.cat_first_seen_today') if is_state('input_boolean.cat_seen_today', 'on') else '',
+            "last_seen": states('input_datetime.cat_last_seen') if is_state('input_boolean.cat_seen_today', 'on') else '',
+            "last_camera": states('input_text.cat_last_camera') if is_state('input_boolean.cat_seen_today', 'on') else ''
+          },
+          "leonardo": {
+            "seen_today": is_state('input_boolean.leonardo_seen_today', 'on'),
+            "first_seen": states('input_datetime.leonardo_first_seen_today') if is_state('input_boolean.leonardo_seen_today', 'on') else '',
+            "last_seen": states('input_datetime.leonardo_last_seen') if is_state('input_boolean.leonardo_seen_today', 'on') else '',
+            "last_camera": states('input_text.leonardo_last_camera') if is_state('input_boolean.leonardo_seen_today', 'on') else '',
+            "car_left_today": is_state('input_boolean.leonardo_car_left_today', 'on'),
+            "car_left_at": states('input_datetime.leonardo_car_left_at') if is_state('input_boolean.leonardo_car_left_today', 'on') else '',
+            "car_arrived_today": is_state('input_boolean.leonardo_car_arrived_today', 'on'),
+            "car_arrived_at": states('input_datetime.leonardo_car_arrived_at') if is_state('input_boolean.leonardo_car_arrived_today', 'on') else ''
+          },
+          "beatriz": {
+            "seen_today": is_state('input_boolean.beatriz_seen_today', 'on'),
+            "first_seen": states('input_datetime.beatriz_first_seen_today') if is_state('input_boolean.beatriz_seen_today', 'on') else '',
+            "last_seen": states('input_datetime.beatriz_last_seen') if is_state('input_boolean.beatriz_seen_today', 'on') else '',
+            "last_camera": states('input_text.beatriz_last_camera') if is_state('input_boolean.beatriz_seen_today', 'on') else ''
+          },
+          "deliveries": {
+            "amazon_seen_today": is_state('input_boolean.amazon_seen_today', 'on'),
+            "amazon_count_today": states('input_number.amazon_count_today') | int(0),
+            "amazon_last_seen": states('input_datetime.amazon_last_seen_today') if is_state('input_boolean.amazon_seen_today', 'on') else '',
+            "ctt_seen_today": is_state('input_boolean.ctt_seen_today', 'on'),
+            "ctt_count_today": states('input_number.ctt_count_today') | int(0),
+            "ctt_last_seen": states('input_datetime.ctt_last_seen_today') if is_state('input_boolean.ctt_seen_today', 'on') else '',
+            "police_seen_today": is_state('input_boolean.police_seen_today', 'on'),
+            "police_count_today": states('input_number.police_count_today') | int(0),
+            "police_last_seen": states('input_datetime.police_last_seen_today') if is_state('input_boolean.police_seen_today', 'on') else ''
+          },
+          "perimeter": {
+            "unknown_person_detected_today": is_state('input_boolean.unknown_person_detected_today', 'on'),
+            "unknown_vehicle_detected_today": is_state('input_boolean.unknown_vehicle_detected_today', 'on'),
+            "unknown_person_count_today": states('input_number.unknown_person_count_today') | int(0),
+            "unknown_vehicle_count_today": states('input_number.unknown_vehicle_count_today') | int(0),
+            "last_unknown_person_time": states('input_datetime.last_unknown_person_time') if is_state('input_boolean.unknown_person_detected_today', 'on') else '',
+            "last_unknown_vehicle_time": states('input_datetime.last_unknown_vehicle_time') if is_state('input_boolean.unknown_vehicle_detected_today', 'on') else ''
+          }
+        } | tojson
+      }}
+
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ can_call_llm }}"
+          sequence:
+            - action: rest_command.ha_logbook_last_day
+              response_variable: logbook_response
+
+            - variables:
+                logbook_context: >-
+                  {% set ns = namespace(lines=[]) %}
+                  {% if logbook_response.status == 200 and logbook_response.content is iterable %}
+                    {% for item in logbook_response.content %}
+                      {% set raw = (
+                        (item.name | default('')) ~ ' ' ~
+                        (item.message | default('')) ~ ' ' ~
+                        (item.entity_id | default(''))
+                      ) | lower %}
+                      {% if 'dog' in raw
+                            or 'cat' in raw
+                            or 'leonardo' in raw
+                            or 'beatriz' in raw
+                            or 'amazon' in raw
+                            or 'ctt' in raw
+                            or 'police' in raw
+                            or 'unknown' in raw
+                            or 'perimeter' in raw
+                            or 'alarm' in raw
+                            or 'gate' in raw %}
+                        {% set line = (
+                          (item.when | default('')) ~ ' | ' ~
+                          (item.name | default(item.entity_id | default('event'))) ~ ' | ' ~
+                          (item.message | default('changed'))
+                        ) %}
+                        {% set ns.lines = ns.lines + [line] %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
+                  {{ (ns.lines[:25]) | join('\n') if ns.lines | count > 0 else 'No relevant logbook entries captured.' }}
+
+                prompt: >-
+                  You are a home status assistant.
+
+                  Write a short and precise daily summary in English.
+                  Use HELPER_FACTS as the source of truth.
+                  Use LOGBOOK_CONTEXT only as secondary context to improve wording and confirm timing.
+                  Never invent facts.
+                  If HELPER_FACTS and LOGBOOK_CONTEXT conflict, trust HELPER_FACTS.
+                  If a value is empty, unknown, or unavailable, treat it as "no record".
+
+                  Formatting rules:
+                  - Write 5 to 8 short lines.
+                  - One fact per line.
+                  - Prefer exact latest times recorded today when available.
+                  - For pets and residents, if they were seen today, mention the latest seen time and the last camera when available.
+                  - If they were not seen today, say that clearly.
+                  - For delivery and classified vehicles, explicitly write separate lines like:
+                    - A CTT delivery vehicle was seen at HH:MM.
+                    - An Amazon delivery vehicle was seen at HH:MM.
+                    - A police car was seen at HH:MM.
+                  - If Leonardo's car left or arrived today, mention the recorded times.
+                  - If no unknown people or vehicles were detected at the perimeter, say that clearly.
+
+                  HELPER_FACTS:
+                  {{ helper_facts_json }}
+
+                  LOGBOOK_CONTEXT:
+                  {{ logbook_context }}
+
+            - action: rest_command.gemini_daily_status
+              data:
+                prompt: "{{ prompt }}"
+              response_variable: gemini_response
+
+            - service: input_datetime.set_datetime
+              target:
+                entity_id: input_datetime.daily_status_last_llm_call
+              data:
+                datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - variables:
+        llm_success_text: >-
+          {% if can_call_llm
+                and gemini_response is defined
+                and gemini_response.status == 200
+                and gemini_response.content is defined
+                and gemini_response.content.candidates is defined
+                and gemini_response.content.candidates | count > 0
+                and gemini_response.content.candidates[0].content is defined
+                and gemini_response.content.candidates[0].content.parts is defined
+                and gemini_response.content.candidates[0].content.parts | count > 0 %}
+            {{ gemini_response.content.candidates[0].content.parts[0].text | trim }}
+          {% else %}
+          {% endif %}
+
+        spoken_message: >-
+          {% if not can_call_llm %}
+            The daily summary was requested very recently. Please wait about one minute and try again.
+          {% elif llm_success_text not in ['','unknown','unavailable'] %}
+            {{ llm_success_text }}
+          {% else %}
+            Daily status (The LLM summary is temporarily unavailable, so this is the local fallback):
+            {% if is_state('input_boolean.dog_seen_today', 'on') %}
+              The dog was detected today.
+            {% else %}
+              The dog was not detected today.
+            {% endif %}
+            {% if is_state('input_boolean.cat_seen_today', 'on') %}
+              The cat was detected today.
+            {% else %}
+              The cat was not detected today.
+            {% endif %}
+            {% if is_state('input_boolean.leonardo_car_left_today', 'on') and is_state('input_boolean.leonardo_car_arrived_today', 'on') %}
+              Leonardo's car left and returned today.
+            {% elif is_state('input_boolean.leonardo_car_left_today', 'on') %}
+              Leonardo's car left today.
+            {% elif is_state('input_boolean.leonardo_car_arrived_today', 'on') %}
+              Leonardo's car arrived today.
+            {% endif %}
+            {% set up = states('input_number.unknown_person_count_today') | int(0) %}
+            {% set uv = states('input_number.unknown_vehicle_count_today') | int(0) %}
+            {% if up == 0 and uv == 0 %}
+              No unknown person or vehicle was detected at the perimeter.
+            {% else %}
+              There were unknown detections at the perimeter today.
+            {% endif %}
+          {% endif %}
+
+    - choose:
+        - conditions: "{{ llm_success_text not in ['','unknown','unavailable'] }}"
+          sequence:
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.daily_status_last_summary
+              data:
+                value: "{{ llm_success_text[:250] ~ '…' }}"
+
+            - service: input_datetime.set_datetime
+              target:
+                entity_id: input_datetime.daily_status_last_summary_time
+              data:
+                datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+    - service: script.broadcast_announcement
+      data:
+        title: "Daily Status"
+        message: "{{ spoken_message }}"
+        notification_id: "daily_status_tts"
+
+- alias: Assistant - track persistent notifications
+  id: assistant_track_persistent_notifications
+  mode: queued
+  trigger:
+    - platform: event
+      event_type: call_service
+      id: create
+      event_data:
+        domain: persistent_notification
+        service: create
+
+    - platform: event
+      event_type: call_service
+      id: dismiss
+      event_data:
+        domain: persistent_notification
+        service: dismiss
+
+    - platform: event
+      event_type: call_service
+      id: dismiss_all
+      event_data:
+        domain: persistent_notification
+        service: dismiss_all
+
+  action:
+    - choose:
+        - conditions: "{{ trigger.id == 'create' }}"
+          sequence:
+            - service: counter.increment
+              target:
+                entity_id: counter.assistant_persistent_notifications
+
+            # Pequeno delay para garantir que a notificação já foi criada no state machine
+            - delay:
+                milliseconds: 300
+
+            - variables:
+                notif_id: >-
+                  {{ trigger.event.data.service_data.notification_id
+                     | default('') }}
+                notif_title: >-
+                  {{ trigger.event.data.service_data.title
+                     | default('') | string | trim }}
+                notif_message: >-
+                  {{ trigger.event.data.service_data.message
+                     | default('') | string | trim }}
+
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.assistant_last_notification_title
+              data:
+                value: >-
+                  {{ notif_title if notif_title not in ['', 'None', 'none']
+                     else 'Notification' }}
+
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.assistant_last_notification_message
+              data:
+                value: >-
+                  {{ notif_message[:255] if notif_message not in ['', 'None', 'none']
+                     else '(no message)' }}
+
+        - conditions: "{{ trigger.id == 'dismiss' }}"
+          sequence:
+            - choose:
+                - conditions: >
+                    {{ states('counter.assistant_persistent_notifications')|int(0) > 0 }}
+                  sequence:
+                    - service: counter.decrement
+                      target:
+                        entity_id: counter.assistant_persistent_notifications
+
+        - conditions: "{{ trigger.id == 'dismiss_all' }}"
+          sequence:
+            - service: counter.reset
+              target:
+                entity_id: counter.assistant_persistent_notifications
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.assistant_last_notification_title
+              data:
+                value: ""
+            - service: input_text.set_value
+              target:
+                entity_id: input_text.assistant_last_notification_message
+              data:
+                value: ""

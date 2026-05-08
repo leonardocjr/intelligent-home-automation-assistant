@@ -1,0 +1,5 @@
+person
+thumbs_up
+thumbs_down
+peace
+stop_hand
