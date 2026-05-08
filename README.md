@@ -1,5 +1,7 @@
 # Intelligent Home Automation Assistant
 
+[![DOI](https://zenodo.org/badge/1232849683.svg)](https://doi.org/10.5281/zenodo.20084254)
+
 An intelligent virtual assistant for domestic home automation control, built around Home Assistant, Frigate, MQTT, and Docker.
 
 ## Overview
@@ -217,7 +219,7 @@ This repository is intended to preserve the software artifact and deployment set
 
 If you use this repository to refer to this work, please cite:
 
-[![DOI](https://zenodo.org/badge/1232849683.svg)](https://doi.org/10.5281/zenodo.20084254)
+**DOI:** [https://doi.org/10.5281/zenodo.20084254](https://doi.org/10.5281/zenodo.20084254)
 
 ```.bib
 @software{canutojunior2026assistant,
