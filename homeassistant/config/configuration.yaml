@@ -1,0 +1,41 @@
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+rest_command:
+  gemini_daily_status:
+    url: !secret gemini_daily_status_url
+    method: POST
+    content_type: "application/json"
+    timeout: 20
+    payload: >-
+      {
+        "contents": [
+          {
+            "parts": [
+              {
+                "text": {{ prompt | tojson }}
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "temperature": 0.1,
+          "maxOutputTokens": 160
+        }
+      }
+
+  ha_logbook_last_day:
+    url: "http://192.168.1.67:8123/api/logbook"
+    method: GET
+    timeout: 20
+    headers:
+      Authorization: !secret ha_llat_bearer
+      Content-Type: "application/json"

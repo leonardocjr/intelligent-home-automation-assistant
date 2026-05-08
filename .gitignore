@@ -1,0 +1,41 @@
+# Home Assistant
+homeassistant/config/.storage/
+homeassistant/config/secrets.yaml
+homeassistant/config/.cloud/
+homeassistant/config/.google.token
+homeassistant/config/ip_bans.yaml
+homeassistant/config/known_devices.yaml
+homeassistant/config/backups/
+
+# Frigate runtime / cache / media
+frigate/media/
+frigate/model_cache/
+frigate/debug/
+frigate/clips/
+frigate/recordings/
+frigate/exports/
+
+# Mosquitto runtime
+mosquitto/data/
+mosquitto/log/
+
+# HA-Bridge runtime / jar / db
+habridge/data/
+habridge/storage/
+*.jar
+
+# Videos, cookies, dumps
+*.mp4
+cookies.txt
+
+# OS / shell / editor
+.bash_history
+.bash_logout
+.bashrc
+.profile
+.wget-hsts
+.motd_shown
+.sudo_as_admin_successful
+.wsl-config
+.DS_Store
+Thumbs.db

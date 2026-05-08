@@ -1,0 +1,58 @@
+broadcast_announcement:
+  alias: "Broadcast Announcement"
+  mode: queued
+  fields:
+    title:
+      description: "Notification title"
+    message:
+      description: "Notification and TTS message"
+    notification_id:
+      description: "Notification ID"
+  sequence:
+    - service: persistent_notification.create
+      data:
+        title: "{{ title }}"
+        message: "{{ message }}"
+        notification_id: "{{ notification_id }}"
+
+    - service: notify.alexa_media
+      data:
+        target:
+          - media_player.speaker
+        message: "{{ message }}"
+        data:
+          type: announce
+
+entity_status_tts:
+  alias: "Entity Status TTS"
+  mode: queued
+  fields:
+    entity_key:
+      description: "dog, cat, leonardo, beatriz"
+    spoken_name:
+      description: "Dog, Cat, Leonardo, Beatriz"
+  sequence:
+    - variables:
+        last_seen: "{{ states('input_datetime.' ~ entity_key ~ '_last_seen') }}"
+        last_camera: "{{ states('input_text.' ~ entity_key ~ '_last_camera') }}"
+        minutes_ago: >
+          {% if last_seen not in ['unknown', 'unavailable', '', none] %}
+            {{ ((as_timestamp(now()) - as_timestamp(last_seen)) / 60) | int(0) }}
+          {% else %}
+            -1
+          {% endif %}
+        message: >
+          {% if last_camera in ['unknown', 'unavailable', '', none] %}
+            I do not have a recent {{ spoken_name }} sighting
+          {% else %}
+            {{ spoken_name }} was last seen {{ minutes_ago }} minutes ago on camera
+            {{ last_camera | replace('_', ' ') | title }}
+          {% endif %}
+
+    - service: notify.alexa_media
+      data:
+        target:
+          - media_player.speaker
+        message: "{{ message }}"
+        data:
+          type: announce
