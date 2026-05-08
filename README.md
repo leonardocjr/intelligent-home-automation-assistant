@@ -223,7 +223,7 @@ If you use this repository to refer to this work, please cite:
 
 ```.bib
 @software{canutojunior2026assistant,
-  author       = {Canuto Junior, Leonardo},
+  author       = {Canuto Junior, Leonardo and Oliveira, Pedro},
   title        = {Intelligent Virtual Assistant for Domestic Home Automation Control},
   year         = {2026},
   version      = {0.1.0},
