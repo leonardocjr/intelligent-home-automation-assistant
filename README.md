@@ -1,5 +1,7 @@
 # Intelligent Home Automation Assistant
+
 [![DOI](https://zenodo.org/badge/1232849683.svg)](https://doi.org/10.5281/zenodo.20084254)
+
 An intelligent virtual assistant for domestic home automation control, built around Home Assistant, Frigate, MQTT, and Docker.
 
 ## Overview
